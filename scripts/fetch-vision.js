@@ -17,13 +17,22 @@ const models = {
   'hand_landmarker.task': base + 'hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
   'face_landmarker.task': base + 'face_landmarker/face_landmarker/float16/1/face_landmarker.task'
 };
+const DOWNLOAD_TIMEOUT_MS = 120000; // 2-minute cap per model so CI never hangs
 function get(url, dest, redirects = 5) {
   return new Promise((res, rej) => {
-    https.get(url, r => {
-      if ([301, 302, 307].includes(r.statusCode) && redirects) return get(r.headers.location, dest, redirects - 1).then(res, rej);
-      if (r.statusCode !== 200) return rej(new Error('HTTP ' + r.statusCode));
-      const f = fs.createWriteStream(dest); r.pipe(f); f.on('finish', () => f.close(res));
-    }).on('error', rej);
+    const timer = setTimeout(() => rej(new Error('download timeout')), DOWNLOAD_TIMEOUT_MS);
+    const req = https.get(url, r => {
+      if ([301, 302, 307].includes(r.statusCode) && redirects) {
+        clearTimeout(timer);
+        return get(r.headers.location, dest, redirects - 1).then(res, rej);
+      }
+      if (r.statusCode !== 200) { clearTimeout(timer); return rej(new Error('HTTP ' + r.statusCode)); }
+      const f = fs.createWriteStream(dest);
+      r.pipe(f);
+      f.on('finish', () => { clearTimeout(timer); f.close(res); });
+      f.on('error', e => { clearTimeout(timer); rej(e); });
+    });
+    req.on('error', e => { clearTimeout(timer); rej(e); });
   });
 }
 (async () => {
@@ -33,4 +42,4 @@ function get(url, dest, redirects = 5) {
     try { await get(url, dest); console.log('[aether] downloaded', name); }
     catch (e) { console.warn('[aether] model download failed for', name, e.message); }
   }
-})();
+})().catch(e => { console.warn('[aether] fetch-vision failed:', e.message); });
