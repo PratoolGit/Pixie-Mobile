@@ -42,13 +42,20 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euxo pipefail
+
+          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=${SDK_DIR}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_DIR}" >> "$GITHUB_ENV"
+          echo "${SDK_DIR}/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "${SDK_DIR}/platform-tools" >> "$GITHUB_PATH"
+
+          export ANDROID_HOME="${SDK_DIR}"
+          export ANDROID_SDK_ROOT="${SDK_DIR}"
+          export PATH="${SDK_DIR}/cmdline-tools/latest/bin:${SDK_DIR}/platform-tools:${PATH}"
 
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
@@ -63,9 +70,10 @@ jobs:
 
           sdkmanager --install \
             "platform-tools" \
+            "platforms;android-34" \
             "platforms;android-${ANDROID_API_LEVEL}" \
-            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
-            "cmdline-tools;latest"
+            "build-tools;34.0.0" \
+            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
 
       - name: Validate repo structure
         shell: bash
