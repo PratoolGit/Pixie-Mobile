@@ -25,19 +25,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Do not install the deprecated 'tools' package.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+          # Optional: if you want the action to install command-line tools:
+          # packages: 'cmdline-tools;latest platform-tools'
 
       - name: Install Android SDK packages
         shell: bash
         run: |
-          set -eu
-
+          set -euo pipefail
           SDKMANAGER="$(command -v sdkmanager || true)"
 
           if [ -z "$SDKMANAGER" ]; then
             for root in "${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}"; do
               [ -n "$root" ] || continue
-
               for candidate in \
                 "$root"/cmdline-tools/*/bin/sdkmanager \
                 "$root"/tools/bin/sdkmanager; do
