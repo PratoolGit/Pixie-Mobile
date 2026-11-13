@@ -10,31 +10,59 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apk:
+    name: Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      NODE_VERSION: '20'
+      JAVA_VERSION: '17'
+      ANDROID_API_LEVEL: '35'
+      ANDROID_BUILD_TOOLS_VERSION: '35.0.0'
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Validate repo structure
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          test -f package.json
+          test -f scripts/build-www.js
+          test -f scripts/fetch-vision.js
+
+          if [ ! -d android ]; then
+            echo "Expected android project directory not found."
+            exit 1
+          fi
+
+          if [ ! -f android/gradlew ]; then
+            echo "Expected android/gradlew not found."
+            exit 1
+          fi
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            cmdline-tools;latest
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
 
       - name: Install Android SDK packages
         shell: bash
@@ -44,48 +72,115 @@ jobs:
         run: |
           set -euxo pipefail
 
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
-          if ! command -v sdkmanager >/dev/null 2>&1; then
-            echo "sdkmanager not found"
-            ls -la "$ANDROID_SDK_ROOT" || true
-            ls -la "$ANDROID_SDK_ROOT/cmdline-tools" || true
+          if [ -z "${ANDROID_SDK_ROOT:-}" ]; then
+            echo "ANDROID_SDK_ROOT is not set."
             exit 1
           fi
 
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager --install \
+          export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            echo "sdkmanager not found in PATH."
+            ls -la "${ANDROID_SDK_ROOT}" || true
+            ls -la "${ANDROID_SDK_ROOT}/cmdline-tools" || true
+            exit 1
+          fi
+
+          yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null || true
+          sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "cmdline-tools;latest"
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund --ignore-scripts && node scripts/fetch-vision.js
+      - name: Install JS dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund --ignore-scripts
+          else
+            npm install --no-audit --no-fund --ignore-scripts
+          fi
+
+          node scripts/fetch-vision.js
 
       - name: Build web bundle
-        run: node scripts/build-www.js
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/build-www.js
 
-      - name: Add Android platform
-        run: npx cap add android && node scripts/patch-android.js && npx cap sync android
+      - name: Prepare Android project
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          if [ ! -d android ]; then
+            echo "Android project directory is missing."
+            exit 1
+          fi
+
+          if [ ! -f scripts/patch-android.js ]; then
+            echo "scripts/patch-android.js is missing."
+            exit 1
+          fi
+
+          if [ ! -d android/app/src/main/assets ]; then
+            npx cap add android
+          fi
+
+          node scripts/patch-android.js
+          npx cap sync android
 
       - name: Assemble debug APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Rename output
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk Pixie-debug.apk
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-      - uses: actions/upload-artifact@v4
+          APK_PATH="$(find android/app/build/outputs/apk/debug -name 'app-debug.apk' -type f | head -n 1)"
+          if [ -z "${APK_PATH:-}" ]; then
+            echo "Debug APK not found."
+            find android -path '*build/outputs*' -maxdepth 6 -type f | sort || true
+            exit 1
+          fi
+
+          cp "${APK_PATH}" Pixie-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
         with:
           name: Pixie-apk
           path: Pixie-debug.apk
 
       - name: Attach to release (tags)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: Pixie-debug.apk
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "Workflow failed. Collecting diagnostic information..."
+          echo "---- Java ----"
+          java -version || true
+          echo "---- Node ----"
+          node -v || true
+          echo "---- npm ----"
+          npm -v || true
+          echo "---- Android SDK ----"
+          ls -la "${ANDROID_SDK_ROOT:-/opt/android-sdk}" || true
+          find "${ANDROID_SDK_ROOT:-/opt/android-sdk}" -maxdepth 3 -type d 2>/dev/null | head -n 200 || true
