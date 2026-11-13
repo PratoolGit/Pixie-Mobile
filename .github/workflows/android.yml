@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          npm ci --no-audit --no-fund --ignore-scripts
+          npm install --no-audit --no-fund --ignore-scripts
           node scripts/fetch-vision.js || true
 
       - name: Build web bundle
