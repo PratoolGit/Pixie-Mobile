@@ -1,0 +1,9 @@
+{
+  "appId": "com.pixie.companion",
+  "appName": "Pixie",
+  "webDir": "www",
+  "backgroundColor": "#14101c",
+  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false },
+  "server": { "androidScheme": "https" },
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
