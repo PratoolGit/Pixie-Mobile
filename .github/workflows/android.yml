@@ -51,13 +51,37 @@ jobs:
           test -f scripts/build-www.js
           test -f scripts/fetch-vision.js
 
+      - name: Install JS dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund --ignore-scripts
+          else
+            npm install --no-audit --no-fund --ignore-scripts
+          fi
+
+          node scripts/fetch-vision.js
+
+      - name: Build web bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/build-www.js
+
+      - name: Ensure Android project exists
+        shell: bash
+        run: |
+          set -euxo pipefail
+
           if [ ! -d android ]; then
-            echo "Expected android project directory not found."
-            exit 1
+            echo "Android project directory missing. Creating it with Capacitor..."
+            npx cap add android
           fi
 
           if [ ! -f android/gradlew ]; then
-            echo "Expected android/gradlew not found."
+            echo "Expected android/gradlew not found after Capacitor setup."
             exit 1
           fi
 
@@ -95,25 +119,6 @@ jobs:
             "build-tools;35.0.0" \
             "cmdline-tools;latest"
 
-      - name: Install JS dependencies
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          if [ -f package-lock.json ]; then
-            npm ci --no-audit --no-fund --ignore-scripts
-          else
-            npm install --no-audit --no-fund --ignore-scripts
-          fi
-
-          node scripts/fetch-vision.js
-
-      - name: Build web bundle
-        shell: bash
-        run: |
-          set -euxo pipefail
-          node scripts/build-www.js
-
       - name: Prepare Android project
         shell: bash
         run: |
@@ -130,6 +135,7 @@ jobs:
           fi
 
           if [ ! -d android/app/src/main/assets ]; then
+            echo "Android app assets missing; syncing capacitor project..."
             npx cap add android
           fi
 
