@@ -56,12 +56,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          if [ -f package-lock.json ]; then
-            npm ci --no-audit --no-fund --ignore-scripts
-          else
-            npm install --no-audit --no-fund --ignore-scripts
-          fi
-
+          npm install --no-audit --no-fund --ignore-scripts
           node scripts/fetch-vision.js
 
       - name: Build web bundle
