@@ -1,4 +1,5 @@
 name: Build Android APK
+
 on:
   push:
     branches: [main, master]
@@ -12,6 +13,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,17 +36,23 @@ jobs:
             platforms;android-35
             build-tools;35.0.0
 
-      - name: Accept Android SDK licenses and install SDK tools
+      - name: Install Android SDK packages
         shell: bash
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: |
-          set -euo pipefail
+          set -euxo pipefail
 
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
 
-          if [ ! -x "$(command -v sdkmanager || true)" ]; then
-            echo "sdkmanager not found in PATH"
-            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
-            echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            echo "sdkmanager not found"
+            ls -la "$ANDROID_SDK_ROOT" || true
+            ls -la "$ANDROID_SDK_ROOT/cmdline-tools" || true
             exit 1
           fi
 
@@ -52,9 +60,10 @@ jobs:
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
-            "build-tools;35.0.0"
+            "build-tools;35.0.0" \
+            "cmdline-tools;latest"
 
-      - name: Install (also fetches MediaPipe runtime + models)
+      - name: Install dependencies
         run: npm install --no-audit --no-fund --ignore-scripts && node scripts/fetch-vision.js
 
       - name: Build web bundle
@@ -67,7 +76,7 @@ jobs:
         working-directory: android
         run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
 
-      - name: Rename
+      - name: Rename output
         run: cp android/app/build/outputs/apk/debug/app-debug.apk Pixie-debug.apk
 
       - uses: actions/upload-artifact@v4
@@ -80,4 +89,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: Pixie-debug.apk
-          
