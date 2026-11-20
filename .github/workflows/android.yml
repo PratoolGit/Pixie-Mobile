@@ -1,0 +1,33 @@
+name: Build Android APK
+on:
+  push: { branches: [main, master] , tags: ['v*'] }
+  pull_request:
+  workflow_dispatch:
+permissions: { contents: write }
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - name: Install (also fetches MediaPipe runtime + models)
+        run: npm install --no-audit --no-fund --ignore-scripts && node scripts/fetch-vision.js
+      - name: Build web bundle
+        run: node scripts/build-www.js
+      - name: Add Android platform
+        run: npx cap add android && node scripts/patch-android.js && npx cap sync android
+      - name: Assemble debug APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: Rename
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Pixie-debug.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: Pixie-apk, path: Pixie-debug.apk }
+      - name: Attach to release (tags)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with: { files: Pixie-debug.apk }
